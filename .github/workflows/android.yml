@@ -5,7 +5,6 @@ on:
     tags:
       - v*
   pull_request:
-    # 分支名称
     branches: [ "master" ]
   workflow_dispatch: { }
 
@@ -14,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      # 矩阵功能，为每个包构建
       matrix:
         flavor: [ default, termux ]
 
@@ -34,25 +32,19 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Workaround for prefab-plugin path issue (for termux flavor)
-      if: matrix.flavor == 'termux' # Применяем только для flavor, где была ошибка
+    - name: Workaround for prefab-plugin path issue (for all flavors)
       run: |
         ACTUAL_FILE_LOCATION="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar"
         EXPECTED_SYMLINK_DIR="$GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs"
         EXPECTED_SYMLINK_PATH="$EXPECTED_SYMLINK_DIR/prefab-plugin-2.1.0.jar"
 
         echo "Attempting to create symlink for prefab-plugin-2.1.0.jar"
-        echo "Actual file is at: $ACTUAL_FILE_LOCATION"
-        echo "Expected symlink location is: $EXPECTED_SYMLINK_PATH"
-
         if [ -f "$ACTUAL_FILE_LOCATION" ]; then
           mkdir -p "$EXPECTED_SYMLINK_DIR"
-          ln -s "$ACTUAL_FILE_LOCATION" "$EXPECTED_SYMLINK_PATH"
-          echo "Symlink created successfully."
-          echo "Listing contents of $EXPECTED_SYMLINK_DIR:"
+          ln -sf "$ACTUAL_FILE_LOCATION" "$EXPECTED_SYMLINK_PATH"
           ls -la "$EXPECTED_SYMLINK_DIR"
         else
-          echo "ERROR: Actual file $ACTUAL_FILE_LOCATION not found. Cannot create symlink."
+          echo "ERROR: $ACTUAL_FILE_LOCATION not found"
           exit 1
         fi
       shell: bash
@@ -66,7 +58,6 @@ jobs:
         TAG_VERSION_NAME=$(grep "val TAG_VERSION_NAME =" build.gradle.kts | awk '{print $4}' | tr -d '"')
         echo "TAG_VERSION_NAME=${TAG_VERSION_NAME}" >> $GITHUB_ENV
 
-    # 重命名
     - name: Rename APK for ${{ matrix.flavor }}
       run: mv build/app_flavor-${{ matrix.flavor }}/outputs/apk/${{ matrix.flavor }}/release/app-${{ matrix.flavor }}-release.apk build/app/outputs/apk/${{ matrix.flavor }}/release/AIDE-${{ matrix.flavor }}.apk
 
