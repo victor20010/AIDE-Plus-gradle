@@ -22,7 +22,7 @@ jobs:
     - name: Checkout repository and submodules
       uses: actions/checkout@v4
       with:
-        submodules: recursive # Добавлено для извлечения сабмодулей
+        submodules: recursive
 
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -33,6 +33,29 @@ jobs:
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
+
+    - name: Workaround for prefab-plugin path issue (for termux flavor)
+      if: matrix.flavor == 'termux' # Применяем только для flavor, где была ошибка
+      run: |
+        ACTUAL_FILE_LOCATION="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar"
+        EXPECTED_SYMLINK_DIR="$GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs"
+        EXPECTED_SYMLINK_PATH="$EXPECTED_SYMLINK_DIR/prefab-plugin-2.1.0.jar"
+
+        echo "Attempting to create symlink for prefab-plugin-2.1.0.jar"
+        echo "Actual file is at: $ACTUAL_FILE_LOCATION"
+        echo "Expected symlink location is: $EXPECTED_SYMLINK_PATH"
+
+        if [ -f "$ACTUAL_FILE_LOCATION" ]; then
+          mkdir -p "$EXPECTED_SYMLINK_DIR"
+          ln -s "$ACTUAL_FILE_LOCATION" "$EXPECTED_SYMLINK_PATH"
+          echo "Symlink created successfully."
+          echo "Listing contents of $EXPECTED_SYMLINK_DIR:"
+          ls -la "$EXPECTED_SYMLINK_DIR"
+        else
+          echo "ERROR: Actual file $ACTUAL_FILE_LOCATION not found. Cannot create symlink."
+          exit 1
+        fi
+      shell: bash
 
     - name: Build APK for ${{ matrix.flavor }}
       run: ./gradlew app_flavor:${{ matrix.flavor }}:assembleRelease
