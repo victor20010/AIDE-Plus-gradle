@@ -19,8 +19,12 @@ jobs:
         flavor: [ default, termux ]
 
     steps:
-    - uses: actions/checkout@v4
-    - name: set up JDK 21
+    - name: Checkout repository and submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive # Добавлено для извлечения сабмодулей
+
+    - name: Set up JDK 21
       uses: actions/setup-java@v4
       with:
         java-version: '21'
@@ -39,7 +43,7 @@ jobs:
         TAG_VERSION_NAME=$(grep "val TAG_VERSION_NAME =" build.gradle.kts | awk '{print $4}' | tr -d '"')
         echo "TAG_VERSION_NAME=${TAG_VERSION_NAME}" >> $GITHUB_ENV
 
-      # 重命名
+    # 重命名
     - name: Rename APK for ${{ matrix.flavor }}
       run: mv build/app_flavor-${{ matrix.flavor }}/outputs/apk/${{ matrix.flavor }}/release/app-${{ matrix.flavor }}-release.apk build/app/outputs/apk/${{ matrix.flavor }}/release/AIDE-${{ matrix.flavor }}.apk
 
