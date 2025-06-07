@@ -29,69 +29,264 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Fix submodule paths
+    - name: Verify initial directory structure (for debugging paths)
       run: |
-        # Создаем необходимые симлинки для корректной работы сборки
-        mkdir -p Submodule/AIDE/app_rewrite/libs
-        ln -sf $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar Submodule/AIDE/app_rewrite/libs/
-        ln -sf $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/android.jar Submodule/AIDE/app_rewrite/libs/
+        echo "====== Verifying Initial Directory Structure ======"
+        echo "Listing GITHUB_WORKSPACE top-level:"
+        ls -la $GITHUB_WORKSPACE
+        echo "--- Listing $GITHUB_WORKSPACE/Submodule/ (if exists) ---"
+        ls -la $GITHUB_WORKSPACE/Submodule/ || echo "Directory $GITHUB_WORKSPACE/Submodule/ not found"
+        echo "--- Listing $GITHUB_WORKSPACE/Submodule/AIDE/ (if exists) ---"
+        ls -la $GITHUB_WORKSPACE/Submodule/AIDE/ || echo "Directory $GITHUB_WORKSPACE/Submodule/AIDE/ not found"
+        echo "--- Listing $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/ (Source for JARs) ---"
+        ls -la $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/ || echo "Directory $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/ not found"
+        echo "--- Listing $GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs/ (Target for symlinks, before creation) ---"
+        ls -la $GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs/ || echo "Directory $GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs/ not found (expected if not yet created)"
+        echo "--- Listing $GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/ (Location of aaptcompiler build file) ---"
+        ls -la $GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/ || echo "Directory $GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/ not found"
+        echo "===================================================="
+
+    - name: Fix submodule paths (Create symlinks)
+      run: |
+        echo "====== Starting 'Fix submodule paths' step ======"
+        # Источники файлов
+        SOURCE_PREFAB_JAR="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar"
+        SOURCE_ANDROID_JAR="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/android.jar"
         
-        # Проверяем существование ключевых файлов
-        if [ ! -f "Submodule/AIDE/app_rewrite/libs/prefab-plugin-2.1.0.jar" ]; then
-          echo "Error: prefab-plugin-2.1.0.jar not found!"
-          exit 1
+        # Целевая директория для симлинков (относительно $GITHUB_WORKSPACE)
+        SYMLINK_DIR_RELATIVE="Submodule/AIDE/app_rewrite/libs"
+        SYMLINK_DIR_ABSOLUTE="$GITHUB_WORKSPACE/$SYMLINK_DIR_RELATIVE"
+
+        echo "Target directory for symlinks: $SYMLINK_DIR_ABSOLUTE"
+        mkdir -p "$SYMLINK_DIR_ABSOLUTE"
+
+        # Symlink для prefab-plugin-2.1.0.jar
+        echo "Checking for source file: $SOURCE_PREFAB_JAR"
+        if [ ! -f "$SOURCE_PREFAB_JAR" ]; then
+          echo "ERROR: Source file prefab-plugin-2.1.0.jar not found at $SOURCE_PREFAB_JAR!"
+          # Показать содержимое предполагаемой директории с исходниками
+          ls -la "$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/" || true 
+          # Не выходим сразу, чтобы проверить и второй JAR
+        else
+          echo "Creating symlink for prefab-plugin-2.1.0.jar"
+          ln -sfv "$SOURCE_PREFAB_JAR" "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar"
+          if [ ! -L "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar" ] || ! readlink -e "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar" > /dev/null; then
+            echo "ERROR: Symlink for prefab-plugin-2.1.0.jar was not created correctly or points to a non-existent file."
+          else
+            echo "Symlink for prefab-plugin-2.1.0.jar seems OK."
+          fi
         fi
 
+        # Symlink для android.jar
+        echo "Checking for source file: $SOURCE_ANDROID_JAR"
+        if [ ! -f "$SOURCE_ANDROID_JAR" ]; then
+          echo "ERROR: Source file android.jar not found at $SOURCE_ANDROID_JAR!"
+          ls -la "$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/" || true
+        else
+          echo "Creating symlink for android.jar"
+          ln -sfv "$SOURCE_ANDROID_JAR" "$SYMLINK_DIR_ABSOLUTE/android.jar"
+           if [ ! -L "$SYMLINK_DIR_ABSOLUTE/android.jar" ] || ! readlink -e "$SYMLINK_DIR_ABSOLUTE/android.jar" > /dev/null; then
+            echo "ERROR: Symlink for android.jar was not created correctly or points to a non-existent file."
+          else
+            echo "Symlink for android.jar seems OK."
+          fi
+        fi
+        
+        echo "Verifying created symlinks in $SYMLINK_DIR_ABSOLUTE/:"
+        ls -la "$SYMLINK_DIR_ABSOLUTE/"
+        
+        # Ваша оригинальная проверка (полезна, если симлинк указывает на сам себя или что-то не то)
+        # Эта проверка должна быть ПОСЛЕ создания симлинка и указывать на путь К СИМЛИНКУ
+        if [ ! -f "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar" ]; then
+          echo "CRITICAL ERROR: prefab-plugin-2.1.0.jar (symlink or file) not found at $SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar after attempting to create symlink!"
+          exit 1
+        fi
+        echo "Symlink creation step finished."
+        echo "================================================"
+
     - name: Fix XML dependencies in aaptcompiler
+      shell: bash # Указываем shell для лучшей обработки команд
       run: |
-        # Проверяем путь к файлу сборки aaptcompiler
+        echo "====== Starting 'Fix XML dependencies in aaptcompiler' step ======"
         XML_GRADLE_FILE="$GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
         
-        if [ -f "$XML_GRADLE_FILE" ]; then
-          echo "Adding XML dependencies to $XML_GRADLE_FILE"
-          
-          # Простой способ добавления зависимостей
-          if grep -q "dependencies" "$XML_GRADLE_FILE"; then
-            # Если блок dependencies уже есть, добавляем зависимости в него
-            cp "$XML_GRADLE_FILE" "$XML_GRADLE_FILE.bak"
-            awk 'BEGIN {found=0} 
-            /dependencies[\s]*\{/ {found=1; print; print "    implementation(\"javax.xml.stream:stax-api:1.0-2\")"; print "    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")"; print "    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")"; next} 
-            {print}' "$XML_GRADLE_FILE.bak" > "$XML_GRADLE_FILE"
-          else
-            # Если блока dependencies нет, добавляем в конец файла
-            echo -e "\ndependencies {\n    implementation(\"javax.xml.stream:stax-api:1.0-2\")\n    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")\n    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")\n}" >> "$XML_GRADLE_FILE"
-          fi
-          
-          echo "Updated $XML_GRADLE_FILE:"
-          cat "$XML_GRADLE_FILE"
-        else
-          echo "WARNING: aaptcompiler build.gradle.kts not found at $XML_GRADLE_FILE"
-          find "$GITHUB_WORKSPACE" -name "aaptcompiler" -type d || true
+        echo "Attempting to find XML Gradle File for aaptcompiler at: $XML_GRADLE_FILE"
+        if [ ! -f "$XML_GRADLE_FILE" ]; then
+          echo "ERROR: XML_GRADLE_FILE for aaptcompiler not found at $XML_GRADLE_FILE."
+          echo "Debug information:"
+          echo "Listing contents of expected parent directory $GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/:"
+          ls -la "$GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/" || true
+          echo "Searching for 'aaptcompiler/build.gradle.kts' within $GITHUB_WORKSPACE/Submodule to help locate it:"
+          find "$GITHUB_WORKSPACE/Submodule" -path "*/aaptcompiler/build.gradle.kts" -ls || echo "find command did not locate the file."
+          exit 1 
         fi
+        
+        echo "XML Gradle File for aaptcompiler found at $XML_GRADLE_FILE."
+        echo "--- Content of $XML_GRADLE_FILE BEFORE modification ---"
+        cat "$XML_GRADLE_FILE"
+        echo "--- END of content BEFORE modification ---"
+        
+        TMP_FILE=$(mktemp)
+        cp "$XML_GRADLE_FILE" "$TMP_FILE" # Работаем с копией
+
+        if grep -q "dependencies[\s]*{" "$TMP_FILE"; then
+          echo "Dependencies block found in $XML_GRADLE_FILE. Adding implementations..."
+          # Используем awk для вставки после строки 'dependencies {'
+          # Этот awk более безопасен и должен корректно вставлять строки
+          awk '
+          /dependencies[\s]*\{/ {
+            print $0
+            print "    implementation(\"javax.xml.stream:stax-api:1.0-2\")"
+            print "    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")"
+            print "    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")"
+            next
+          }
+          { print $0 }
+          ' "$TMP_FILE" > "${TMP_FILE}.mod"
+        else
+          echo "Dependencies block NOT found in $XML_GRADLE_FILE. Appending new dependencies block..."
+          # Копируем содержимое и добавляем новый блок в конец
+          cat "$TMP_FILE" > "${TMP_FILE}.mod" # Сначала копируем оригинал
+          echo -e "\ndependencies {\n    implementation(\"javax.xml.stream:stax-api:1.0-2\")\n    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")\n    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")\n}" >> "${TMP_FILE}.mod"
+        fi
+        
+        if [ -s "${TMP_FILE}.mod" ]; then # Проверяем, что модифицированный файл не пустой
+            echo "Applying changes to $XML_GRADLE_FILE."
+            mv "${TMP_FILE}.mod" "$XML_GRADLE_FILE" # Заменяем оригинальный файл
+        else
+            echo "ERROR: Modified temporary file for $XML_GRADLE_FILE is empty. No changes applied."
+            rm "${TMP_FILE}.mod" # Удаляем пустой модифицированный файл
+            rm "$TMP_FILE"       # Удаляем оригинальную копию
+            exit 1
+        fi
+        rm "$TMP_FILE" # Удаляем оригинальную копию, если все прошло успешно
+        
+        echo "--- Content of $XML_GRADLE_FILE AFTER modification ---"
+        cat "$XML_GRADLE_FILE"
+        echo "--- END of content AFTER modification ---"
+        echo "XML dependencies fix for aaptcompiler applied."
+        echo "==========================================================="
+
+    - name: Attempt to add XML dependencies to Root Project (for D8 issue)
+      shell: bash
+      run: |
+        echo "====== Attempting to add XML dependencies to root project's build file ======"
+        ROOT_BUILD_KTS="$GITHUB_WORKSPACE/build.gradle.kts"
+        ROOT_BUILD_GRADLE="$GITHUB_WORKSPACE/build.gradle"
+        TARGET_ROOT_FILE=""
+
+        if [ -f "$ROOT_BUILD_KTS" ]; then
+          TARGET_ROOT_FILE="$ROOT_BUILD_KTS"
+          echo "Found root build.gradle.kts"
+        elif [ -f "$ROOT_BUILD_GRADLE" ]; then
+          TARGET_ROOT_FILE="$ROOT_BUILD_GRADLE"
+          echo "Found root build.gradle"
+        else
+          echo "WARNING: No root build.gradle or build.gradle.kts found. Skipping this step."
+          exit 0 # Выходим успешно, т.к. это опциональный шаг
+        fi
+
+        echo "--- Content of $TARGET_ROOT_FILE BEFORE modification ---"
+        cat "$TARGET_ROOT_FILE"
+        echo "--- END of content BEFORE modification ---"
+        
+        TMP_ROOT_FILE=$(mktemp)
+        cp "$TARGET_ROOT_FILE" "$TMP_ROOT_FILE"
+
+        # Пробуем добавить в блок allprojects.dependencies или просто dependencies
+        # Это очень упрощенный подход, может потребоваться адаптация
+        if grep -q "allprojects[\s]*{" "$TMP_ROOT_FILE" && grep -A 10 "allprojects[\s]*{" "$TMP_ROOT_FILE" | grep -q "dependencies[\s]*{"; then
+            echo "Found allprojects -> dependencies block in $TARGET_ROOT_FILE."
+            awk '
+            /allprojects[\s]*\{/ { in_allprojects=1 }
+            in_allprojects && /dependencies[\s]*\{/ {
+                print $0
+                print "        implementation(\"javax.xml.stream:stax-api:1.0-2\")"
+                print "        implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")"
+                print "        implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")"
+                in_allprojects_deps=1 # Флаг, что мы внутри нужного блока
+                next
+            }
+            # Сброс флага in_allprojects_deps при выходе из блока dependencies
+            in_allprojects_deps && /}/ { in_allprojects_deps=0 }
+            # Сброс флага in_allprojects при выходе из блока allprojects, если мы не в dependencies
+            in_allprojects && !in_allprojects_deps && /}/ { in_allprojects=0 }
+            { print $0 }
+            ' "$TMP_ROOT_FILE" > "${TMP_ROOT_FILE}.mod"
+        elif grep -q "dependencies[\s]*{" "$TMP_ROOT_FILE"; then
+            echo "Found root dependencies block in $TARGET_ROOT_FILE."
+            awk '
+            /dependencies[\s]*\{/ {
+                print $0
+                print "    implementation(\"javax.xml.stream:stax-api:1.0-2\")"
+                print "    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")"
+                print "    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")"
+                next
+            }
+            { print $0 }
+            ' "$TMP_ROOT_FILE" > "${TMP_ROOT_FILE}.mod"
+        else
+            echo "No suitable dependencies block found in $TARGET_ROOT_FILE. Appending new one (experimental)."
+            cat "$TMP_ROOT_FILE" > "${TMP_ROOT_FILE}.mod"
+            echo -e "\ndependencies {\n    implementation(\"javax.xml.stream:stax-api:1.0-2\")\n    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")\n    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")\n}" >> "${TMP_ROOT_FILE}.mod"
+        fi
+        
+        if [ -s "${TMP_ROOT_FILE}.mod" ]; then
+            echo "Applying changes to $TARGET_ROOT_FILE."
+            mv "${TMP_ROOT_FILE}.mod" "$TARGET_ROOT_FILE"
+        else
+            echo "ERROR: Modified temporary file for $TARGET_ROOT_FILE is empty. No changes applied."
+            rm "${TMP_ROOT_FILE}.mod" || true
+        fi
+        rm "$TMP_ROOT_FILE" || true
+
+        echo "--- Content of $TARGET_ROOT_FILE AFTER modification ---"
+        cat "$TARGET_ROOT_FILE"
+        echo "--- END of content AFTER modification ---"
+        echo "Attempt to add XML dependencies to root project finished."
+        echo "=========================================================================="
 
     - name: Build APK for termux
       run: |
         ./gradlew clean
+        # Для более детального лога добавьте --debug
         ./gradlew :app_flavor:termux:assembleRelease --stacktrace --info
 
     - name: Get version info
       id: version
       run: |
-        VERSION=$(grep -m 1 "versionName" app_flavor/termux/build.gradle | awk '{print $2}' | tr -d '"')
-        echo "VERSION=${VERSION}" >> $GITHUB_ENV
-        echo "APK_NAME=AIDE-Plus-Termux-v${VERSION}.apk" >> $GITHUB_ENV
+        VERSION_FILE_PATH="app_flavor/termux/build.gradle" # Убедитесь, что это правильный файл (может быть .kts)
+        if [ ! -f "$VERSION_FILE_PATH" ]; then
+          echo "Error: Version file not found at $VERSION_FILE_PATH"
+          exit 1
+        fi
+        VERSION_CANDIDATE=$(grep -m 1 "versionName" "$VERSION_FILE_PATH" | awk '{print $2}' | tr -d '"')
+        if [ -z "$VERSION_CANDIDATE" ]; then
+          echo "Error: Could not extract version name from $VERSION_FILE_PATH using 'versionName'."
+          echo "Content of $VERSION_FILE_PATH:"
+          cat "$VERSION_FILE_PATH"
+          exit 1
+        fi
+        echo "Extracted VERSION=${VERSION_CANDIDATE}"
+        echo "VERSION=${VERSION_CANDIDATE}" >> $GITHUB_ENV
+        echo "APK_NAME=AIDE-Plus-Termux-v${VERSION_CANDIDATE}.apk" >> $GITHUB_ENV
 
     - name: Rename and move APK
       run: |
         mkdir -p build/outputs/apk/
-        # Check if APK exists at expected location
-        if [ -f "app_flavor/termux/build/outputs/apk/termux/release/app-termux-release.apk" ]; then
-          mv app_flavor/termux/build/outputs/apk/termux/release/app-termux-release.apk build/outputs/apk/${APK_NAME}
+        EXPECTED_APK_PATH="app_flavor/termux/build/outputs/apk/termux/release/app-termux-release.apk"
+        echo "Looking for APK at: $EXPECTED_APK_PATH"
+        if [ -f "$EXPECTED_APK_PATH" ]; then
+          mv "$EXPECTED_APK_PATH" "build/outputs/apk/${APK_NAME}"
           echo "APK successfully renamed and moved to build/outputs/apk/${APK_NAME}"
         else
-          echo "WARNING: APK not found at expected location"
-          # Find any APK files
-          find "$GITHUB_WORKSPACE" -name "*.apk" -type f
+          echo "WARNING: APK not found at expected location: $EXPECTED_APK_PATH"
+          echo "Searching for *.apk files in $GITHUB_WORKSPACE/app_flavor/termux/build/outputs/apk/ ..."
+          find "$GITHUB_WORKSPACE/app_flavor/termux/build/outputs/apk/" -name "*.apk" -ls || echo "No APKs found in specific output dir."
+          echo "Searching for *.apk files in $GITHUB_WORKSPACE/build/outputs/apk/ ..."
+          find "$GITHUB_WORKSPACE/build/outputs/apk/" -name "*.apk" -ls || echo "No APKs found in general build output dir."
+          echo "Searching for *.apk files in entire $GITHUB_WORKSPACE ..."
+          find "$GITHUB_WORKSPACE" -name "*.apk" -ls || echo "No APKs found in workspace."
           exit 1
         fi
         
