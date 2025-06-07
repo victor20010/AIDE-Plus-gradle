@@ -50,11 +50,15 @@ jobs:
       run: |
         FILE="gradle/libs.versions.toml"
         # Ensure [versions] exists and add versions if not present
-        grep -q '^\[versions\]' "$FILE" || echo '[versions]' | cat - "$FILE" > temp && mv temp "$FILE"
+        if ! grep -q '^\[versions\]' "$FILE"; then
+          echo '[versions]' | cat - "$FILE" > temp && mv temp "$FILE"
+        fi
         grep -q '^woodstox-core[ ]*=' "$FILE" || sed -i '/^\[versions\]/a woodstox-core = "6.2.4"' "$FILE"
         grep -q '^stax-api[ ]*=' "$FILE" || sed -i '/^\[versions\]/a stax-api = "1.0-2"' "$FILE"
         # Ensure [libraries] exists and add libraries if not present
-        grep -q '^\[libraries\]' "$FILE" || echo '[libraries]' >> "$FILE"
+        if ! grep -q '^\[libraries\]' "$FILE"; then
+          echo '[libraries]' >> "$FILE"
+        fi
         grep -q '^woodstox-core[ ]*=' "$FILE" || sed -i '/^\[libraries\]/a woodstox-core = { module = "org.codehaus.woodstox:woodstox-core", version.ref = "woodstox-core" }' "$FILE"
         grep -q '^stax-api[ ]*=' "$FILE" || sed -i '/^\[libraries\]/a stax-api = { module = "javax.xml.stream:stax-api", version.ref = "stax-api" }' "$FILE"
         echo "----- gradle/libs.versions.toml -----"
