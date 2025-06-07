@@ -50,23 +50,24 @@ jobs:
         if [ -f "$XML_GRADLE_FILE" ]; then
           echo "Adding XML dependencies to $XML_GRADLE_FILE"
           
+          # Создаем временный файл для dependencies
+          cat > xml_dependencies.txt << 'EOL'
+            implementation("javax.xml.stream:stax-api:1.0-2")
+            implementation("com.sun.xml.parsers:jaxp-ri:1.4.5")
+            implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")
+          EOL
+          
           # Проверяем наличие блока dependencies
           if grep -q "dependencies\s*{" "$XML_GRADLE_FILE"; then
             # Добавляем зависимости в существующий блок dependencies
-            sed -i '/dependencies\s*{/a \
-                implementation("javax.xml.stream:stax-api:1.0-2")\
-                implementation("com.sun.xml.parsers:jaxp-ri:1.4.5")\
-                implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")' "$XML_GRADLE_FILE"
+            sed -i '/dependencies\s*{/r xml_dependencies.txt' "$XML_GRADLE_FILE"
           else
             # Создаем новый блок dependencies
-            echo "
-dependencies {
-    implementation(\"javax.xml.stream:stax-api:1.0-2\")
-    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")
-    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")
-}
-" >> "$XML_GRADLE_FILE"
+            echo -e "\ndependencies {\n$(cat xml_dependencies.txt)\n}" >> "$XML_GRADLE_FILE"
           fi
+          
+          # Удаляем временный файл
+          rm xml_dependencies.txt
           
           echo "Updated $XML_GRADLE_FILE:"
           cat "$XML_GRADLE_FILE"
