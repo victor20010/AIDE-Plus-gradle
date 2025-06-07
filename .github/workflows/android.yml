@@ -45,6 +45,26 @@ jobs:
         fi
       shell: bash
 
+    - name: Add missing XML dependencies
+      run: |
+        echo "Adding missing XML dependencies to aaptcompiler module"
+        XML_GRADLE_FILE="$GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
+        
+        if [ -f "$XML_GRADLE_FILE" ]; then
+          # Check if dependencies block exists
+          if grep -q "dependencies" "$XML_GRADLE_FILE"; then
+            # Add dependency before the closing brace of dependencies block
+            sed -i '/dependencies {/a \    implementation("javax.xml.stream:stax-api:1.0-2")' "$XML_GRADLE_FILE"
+          else
+            # Add new dependencies block
+            echo -e "\ndependencies {\n    implementation(\"javax.xml.stream:stax-api:1.0-2\")\n}" >> "$XML_GRADLE_FILE"
+          fi
+          cat "$XML_GRADLE_FILE"
+        else
+          echo "WARNING: aaptcompiler build.gradle.kts not found at expected location"
+        fi
+      shell: bash
+
     - name: Build APK for termux
       run: ./gradlew app_flavor:termux:assembleRelease
 
@@ -53,9 +73,32 @@ jobs:
       run: |
         TAG_VERSION_NAME=$(grep "val TAG_VERSION_NAME =" build.gradle.kts | awk '{print $4}' | tr -d '"')
         echo "TAG_VERSION_NAME=${TAG_VERSION_NAME}" >> $GITHUB_ENV
+        echo "Found version: ${TAG_VERSION_NAME}"
+
+    - name: Create output directories
+      run: mkdir -p build/app/outputs/apk/termux/release/
+
+    - name: Find built APK
+      id: find_apk
+      run: |
+        APK_PATH=$(find $GITHUB_WORKSPACE -name "*.apk" -path "*/app_flavor-termux/outputs/apk/*/release/*" | head -n 1)
+        if [ -z "$APK_PATH" ]; then
+          echo "ERROR: Could not find built APK"
+          find $GITHUB_WORKSPACE -name "*.apk"
+          exit 1
+        fi
+        echo "APK_PATH=${APK_PATH}" >> $GITHUB_ENV
+        echo "Found APK at: ${APK_PATH}"
 
     - name: Rename APK for termux
-      run: mv build/app_flavor-termux/outputs/apk/termux/release/app-termux-release.apk build/app/outputs/apk/termux/release/AIDE-termux.apk
+      run: |
+        if [ -f "$APK_PATH" ]; then
+          cp "$APK_PATH" build/app/outputs/apk/termux/release/AIDE-termux.apk
+          echo "Renamed APK from $APK_PATH to build/app/outputs/apk/termux/release/AIDE-termux.apk"
+        else
+          echo "ERROR: APK not found at $APK_PATH"
+          exit 1
+        fi
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
