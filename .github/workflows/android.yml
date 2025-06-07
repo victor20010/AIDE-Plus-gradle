@@ -1,10 +1,7 @@
-name: Build & Publish Termux APK
+name: Build Debug APK
 
 on:
   push:
-    tags:
-      - v*
-  pull_request:
     branches: [ "master" ]
   workflow_dispatch:
 
@@ -17,7 +14,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: recursive
-        fetch-depth: 0
 
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -26,7 +22,7 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # Этот шаг остается, так как он, видимо, необходим для структуры вашего проекта
+    # Этот шаг остается для исправления путей в подмодулях
     - name: Fix submodule paths (Create symlinks)
       run: |
         SOURCE_PREFAB_JAR="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar"
@@ -35,116 +31,56 @@ jobs:
         mkdir -p "$SYMLINK_DIR_ABSOLUTE"
         ln -sfv "$SOURCE_PREFAB_JAR" "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar"
         ln -sfv "$SOURCE_ANDROID_JAR" "$SYMLINK_DIR_ABSOLUTE/android.jar"
-        echo "Verifying created symlinks:"
-        ls -la "$SYMLINK_DIR_ABSOLUTE/"
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
-
-    # --- НАЧАЛО ИСПРАВЛЕНИЙ ---
-    # Этот шаг динамически исправляет файлы Gradle перед сборкой.
-
-    - name: Patch Gradle files
+      
+    # --- НОВЫЙ ШАГ: СКАЧИВАЕМ ПРОБЛЕМНЫЕ ЗАВИСИМОСТИ ВРУЧНУЮ ---
+    - name: Download and cache missing dependencies
       run: |
-        # --- ШАГ 1: Добавляем недостающие зависимости в aaptcompiler ---
-        # Это решает проблему "Unresolved reference 'XMLEventReader'"
-        AAPT_BUILD_FILE="Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
-        echo "--- Patching aaptcompiler dependencies in $AAPT_BUILD_FILE ---"
+        echo "Downloading dependencies that fail from JitPack..."
+        # Создаем локальную папку для библиотек
+        mkdir -p $GITHUB_WORKSPACE/local-libs
         
-        if [ -f "$AAPT_BUILD_FILE" ]; then
-          # Проверяем, что блока dependencies еще нет, чтобы не дублировать
-          if ! grep -q "dependencies {" "$AAPT_BUILD_FILE"; then
-            echo "Dependencies block not found. Adding it."
-            # Добавляем блок dependencies в конец файла
-            echo '' >> "$AAPT_BUILD_FILE"
-            echo 'dependencies {' >> "$AAPT_BUILD_FILE"
-            echo '    implementation("javax.xml.stream:stax-api:1.0-2")' >> "$AAPT_BUILD_FILE"
-            echo '    implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")' >> "$AAPT_BUILD_FILE"
-            echo '}' >> "$AAPT_BUILD_FILE"
-            echo "File $AAPT_BUILD_FILE after patching:"
-            cat "$AAPT_BUILD_FILE"
-          else
-            echo "Dependencies block already exists. Skipping patch."
-          fi
-        else
-          echo "ERROR: aaptcompiler build file not found at $AAPT_BUILD_FILE"
-          exit 1
-        fi
+        # Скачиваем файлы с помощью wget. -T 15 (таймаут 15с), -t 3 (3 попытки)
+        wget -T 15 -t 3 https://jitpack.io/com/github/promeg/tinypinyin/2.0.3/tinypinyin-2.0.3.jar -O $GITHUB_WORKSPACE/local-libs/tinypinyin-2.0.3.jar
+        wget -T 15 -t 3 https://jitpack.io/com/github/promeg/tinypinyin-lexicons-java-cncity/2.0.3/tinypinyin-lexicons-java-cncity-2.0.3.jar -O $GITHUB_WORKSPACE/local-libs/tinypinyin-lexicons-java-cncity-2.0.3.jar
+        
+        echo "Local libs content:"
+        ls -la $GITHUB_WORKSPACE/local-libs
 
-        # --- ШАГ 2: Исключаем конфликтующую зависимость stax2-api из всей сборки ---
-        # Это решает основную проблему "Duplicate class"
-        ROOT_BUILD_FILE="build.gradle.kts" # Корневой файл сборки
-        echo ""
-        echo "--- Patching root build file $ROOT_BUILD_FILE to exclude duplicate dependencies ---"
-
-        if [ -f "$ROOT_BUILD_FILE" ]; then
-          # Проверяем, что правило исключения еще не добавлено
-          if ! grep -q "org.codehaus.woodstox" "$ROOT_BUILD_FILE"; then
-            echo "Exclusion rule for stax2-api not found. Adding it."
-            # Добавляем глобальное правило в конец корневого build.gradle.kts
+    # --- ШАГ ИЗМЕНЕНИЯ GRADLE ФАЙЛОВ ---
+    - name: Patch Gradle files for local dependencies
+      run: |
+        # 1. Исправляем конфликт stax2-api
+        ROOT_BUILD_FILE="build.gradle.kts"
+        if ! grep -q "org.codehaus.woodstox" "$ROOT_BUILD_FILE"; then
+            echo "Adding exclusion rule for stax2-api..."
             echo '' >> "$ROOT_BUILD_FILE"
-            echo '// Exclude stax2-api, as it is already provided by the Kotlin compiler' >> "$ROOT_BUILD_FILE"
-            echo 'configurations.all {' >> "$ROOT_BUILD_FILE"
-            echo '    resolutionStrategy.eachDependency {' >> "$ROOT_BUILD_FILE"
-            echo '        if (requested.group == "org.codehaus.woodstox" && requested.name == "stax2-api") {' >> "$ROOT_BUILD_FILE"
-            echo '            useVersion("0")' >> "$ROOT_BUILD_FILE"
-            echo '        }' >> "$ROOT_BUILD_FILE"
-            echo '    }' >> "$ROOT_BUILD_FILE"
-            echo '}' >> "$ROOT_BUILD_FILE"
-            echo "File $ROOT_BUILD_FILE after patching:"
-            cat "$ROOT_BUILD_FILE"
-          else
-            echo "Exclusion rule already exists in $ROOT_BUILD_FILE. Skipping patch."
-          fi
-        else
-          echo "WARNING: Root build.gradle.kts not found. The duplicate class error might persist."
+            echo 'configurations.all { resolutionStrategy.eachDependency { if (requested.group == "org.codehaus.woodstox" && requested.name == "stax2-api") { useVersion("0") } } }' >> "$ROOT_BUILD_FILE"
         fi
-        echo "--- Gradle patching finished ---"
-
-    # --- КОНЕЦ ИСПРАВЛЕНИЙ ---
-
-    - name: Build APK for termux
-      run: ./gradlew :app_flavor:termux:assembleRelease --stacktrace
-
-    - name: Get version info
-      id: version
-      run: |
-        VERSION_FILE_PATH="app_flavor/termux/build.gradle"
-        VERSION_CANDIDATE=$(grep -m 1 "versionName" "$VERSION_FILE_PATH" | awk '{print $2}' | tr -d '"')
-        echo "Extracted VERSION=${VERSION_CANDIDATE}"
-        echo "VERSION=${VERSION_CANDIDATE}" >> $GITHUB_ENV
-        echo "APK_NAME=AIDE-Plus-Termux-v${VERSION_CANDIDATE}.apk" >> $GITHUB_ENV
-
-    - name: Rename and move APK
-      run: |
-        mkdir -p build/outputs/apk/
-        EXPECTED_APK_PATH="app_flavor/termux/build/outputs/apk/termux/release/app-termux-release.apk"
-        if [ -f "$EXPECTED_APK_PATH" ]; then
-          mv "$EXPECTED_APK_PATH" "build/outputs/apk/${{ env.APK_NAME }}"
-          echo "APK successfully renamed and moved to build/outputs/apk/${{ env.APK_NAME }}"
-        else
-          echo "ERROR: APK not found at expected location: $EXPECTED_APK_PATH"
-          find "$GITHUB_WORKSPACE" -name "*.apk" -ls
-          exit 1
-        fi
-
-    - name: Upload APK artifact
+        
+        # 2. Указываем модулю app_rewrite использовать скачанные локальные файлы
+        APP_REWRITE_BUILD_FILE="Submodule/AIDE/app_rewrite/build.gradle.kts"
+        echo "Patching $APP_REWRITE_BUILD_FILE to use local libs..."
+        # Добавляем репозиторий flatDir в начало файла
+        sed -i '1s;^;repositories {\n    flatDir {\n        dirs(rootProject.file("local-libs"))\n    }\n}\n;' "$APP_REWRITE_BUILD_FILE"
+        
+        # Добавляем зависимости в конец файла
+        echo '' >> "$APP_REWRITE_BUILD_FILE"
+        echo 'dependencies { implementation(group = "com.github.promeg", name = "tinypinyin", version = "2.0.3") }' >> "$APP_REWRITE_BUILD_FILE"
+        echo 'dependencies { implementation(group = "com.github.promeg", name = "tinypinyin-lexicons-java-cncity", version = "2.0.3") }' >> "$APP_REWRITE_BUILD_FILE"
+        
+        echo "Patched file content:"
+        cat "$APP_REWRITE_BUILD_FILE"
+        
+    # --- ШАГ СБОРКИ В РЕЖИМЕ DEBUG ---
+    - name: Build APK (in Debug mode)
+      run: ./gradlew :app_flavor:termux:assembleDebug --stacktrace
+      
+    # ... дальнейшие шаги, например, загрузка артефакта ...
+    - name: Upload Debug APK
       uses: actions/upload-artifact@v4
       with:
-        name: AIDE-Plus-Termux-APK
-        path: build/outputs/apk/${{ env.APK_NAME }}
-        
-    # Шаги для GitHub Pages остаются без изменений
-    - name: Setup GitHub Pages
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/configure-pages@v4
-
-    - name: Upload to GitHub Pages
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: build/outputs/apk/
-
-    - name: Deploy to GitHub Pages
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/deploy-pages@v4
+        name: AIDE-Plus-Termux-Debug-APK
+        path: app_flavor/termux/build/outputs/apk/debug/app-termux-debug.apk
