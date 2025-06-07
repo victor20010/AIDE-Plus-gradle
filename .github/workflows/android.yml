@@ -104,26 +104,79 @@ jobs:
         # Зависимости, которые нужно добавить
         # Обратите внимание на экранирование кавычек и использование переменных для читаемости
         DEP1='implementation("javax.xml.stream:stax-api:1.0-2")'
-        DEP2='implementation("com.sun.xml.parsers:jaxp-ri:1.4.5")'
-        DEP3='implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")'
+        # DEP2='implementation("com.sun.xml.parsers:jaxp-ri:1.4.5")' # jaxp-ri might be too much, stax-api should be enough
+        DEP3='implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")' # Woodstox is a StAX implementation
         # Формируем текст для вставки с правильными отступами (4 пробела)
-        DEPS_TO_ADD="    $DEP1\n    $DEP2\n    $DEP3"
+        DEPS_TO_ADD="    $DEP1\\n    $DEP3" # Removed DEP2 for now
 
-        if grep -q "dependencies[\s]*{" "$XML_GRADLE_FILE"; then
+        if grep -q "dependencies[\\s]*{" "$XML_GRADLE_FILE"; then
           echo "Dependencies block found in $XML_GRADLE_FILE. Adding implementations..."
           # Используем sed для вставки новых зависимостей после строки 'dependencies {'
           # Это заменит открывающую фигурную скобку на скобку + новые зависимости
           # Такой подход должен корректно работать и для "dependencies {}" и для "dependencies { ... }"
-          sed -i "s|dependencies[\s]*{|dependencies {\n$DEPS_TO_ADD|" "$XML_GRADLE_FILE"
+          sed -i "s|dependencies[\\s]*{|dependencies {\\n$DEPS_TO_ADD|" "$XML_GRADLE_FILE"
         else
           echo "Dependencies block NOT found in $XML_GRADLE_FILE. Appending new dependencies block..."
-          echo -e "\ndependencies {\n$DEPS_TO_ADD\n}" >> "$XML_GRADLE_FILE"
+          echo -e "\\ndependencies {\\n$DEPS_TO_ADD\\n}" >> "$XML_GRADLE_FILE"
         fi
         
         echo "--- Content of $XML_GRADLE_FILE AFTER modification ---"
         cat "$XML_GRADLE_FILE"
         echo "--- END of content AFTER modification ---"
         echo "XML dependencies fix for aaptcompiler applied."
+        echo "==========================================================="
+
+    - name: Exclude conflicting jaxp-api module from root project
+      shell: bash
+      run: |
+        echo "====== Starting 'Exclude conflicting jaxp-api module' step ======"
+        ROOT_GRADLE_FILE="$GITHUB_WORKSPACE/build.gradle.kts" # Or build.gradle if you use Groovy
+        
+        if [ ! -f "$ROOT_GRADLE_FILE" ]; then
+          echo "ERROR: Root Gradle file not found at $ROOT_GRADLE_FILE. Please check the path."
+          exit 1
+        fi
+        
+        echo "Root Gradle file found at $ROOT_GRADLE_FILE."
+        echo "--- Content of $ROOT_GRADLE_FILE BEFORE modification ---"
+        cat "$ROOT_GRADLE_FILE"
+        echo "--- END of content BEFORE modification ---"
+        
+        # Check if the exclusion already exists to avoid duplication
+        if grep -q "exclude group: \"javax.xml.parsers\", module: \"jaxp-api\"" "$ROOT_GRADLE_FILE"; then
+          echo "Exclusion for jaxp-api already exists in $ROOT_GRADLE_FILE. Skipping."
+        else
+          echo "Adding exclusion for jaxp-api to $ROOT_GRADLE_FILE."
+          # This is a generic way. You might need to target a specific dependency configuration.
+          # Example: Add to all configurations that might include it.
+          # This sed command adds the exclusion to any 'implementation(...)' or 'api(...)' line.
+          # Adjust the pattern if your conflicting dependency is declared differently.
+          # This example tries to add it to a common dependency if you know it.
+          # If you don't know which specific dependency, you might need a more complex script
+          # or apply it to all 'configurations.all { ... }'
+          
+          # Attempt to add to a specific known problematic dependency (replace 'com.example:problematic-library')
+          # if sed -i '/implementation("com.example:problematic-library:[^"]*")/ {a\
+          # /        exclude(group = "javax.xml.parsers", module = "jaxp-api")\
+          # / }' "$ROOT_GRADLE_FILE"; then
+          #    echo "Added exclusion to com.example:problematic-library"
+          # else
+          #    echo "Could not find com.example:problematic-library to add exclusion, attempting global exclusion."
+             # Global exclusion (less ideal, but can work as a fallback)
+             # This adds a configurations.all block if not present, or appends to it.
+             if grep -q "configurations.all {" "$ROOT_GRADLE_FILE"; then
+               sed -i '/configurations.all {/a \ \ \ \ resolutionStrategy.eachDependency { \n        if (requested.group == "javax.xml.parsers" && requested.name == "jaxp-api") {\n            useVersion("0") // Effectively exclude by requesting a non-existent version\n        }\n    }' "$ROOT_GRADLE_FILE"
+             else
+               echo -e "\\nconfigurations.all {\\n    resolutionStrategy.eachDependency { \\n        if (requested.group == \"javax.xml.parsers\" && requested.name == \"jaxp-api\") {\\n            useVersion(\"0\") \\n        }\\n    }\\n}" >> "$ROOT_GRADLE_FILE"
+             fi
+          echo "Applied a general exclusion rule for jaxp-api."
+        # fi # End of specific dependency check
+        fi # End of checking if exclusion already exists
+        
+        echo "--- Content of $ROOT_GRADLE_FILE AFTER modification ---"
+        cat "$ROOT_GRADLE_FILE"
+        echo "--- END of content AFTER modification ---"
+        echo "Exclusion step for jaxp-api finished."
         echo "==========================================================="
 
     - name: Build APK for termux
