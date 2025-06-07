@@ -26,178 +26,91 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-
-    - name: Verify initial directory structure (for debugging paths)
-      run: |
-        echo "====== Verifying Initial Directory Structure ======"
-        echo "Listing GITHUB_WORKSPACE top-level:"
-        ls -la $GITHUB_WORKSPACE
-        echo "--- Listing $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/ (Source for JARs) ---"
-        ls -la $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/ || echo "Directory $GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/ not found"
-        echo "--- Listing $GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs/ (Target for symlinks, before creation) ---"
-        ls -la $GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs/ || echo "Directory $GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs/ not found (expected if not yet created)"
-        echo "--- Listing $GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/ (Location of aaptcompiler build file) ---"
-        ls -la $GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/ || echo "Directory $GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/ not found"
-        echo "===================================================="
-
+    # Этот шаг остается, так как он, видимо, необходим для структуры вашего проекта
     - name: Fix submodule paths (Create symlinks)
       run: |
-        echo "====== Starting 'Fix submodule paths' step ======"
         SOURCE_PREFAB_JAR="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar"
         SOURCE_ANDROID_JAR="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/android.jar"
         SYMLINK_DIR_ABSOLUTE="$GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs"
-
-        echo "Target directory for symlinks: $SYMLINK_DIR_ABSOLUTE"
         mkdir -p "$SYMLINK_DIR_ABSOLUTE"
-
-        echo "Checking for source file: $SOURCE_PREFAB_JAR"
-        if [ ! -f "$SOURCE_PREFAB_JAR" ]; then
-          echo "ERROR: Source file prefab-plugin-2.1.0.jar not found at $SOURCE_PREFAB_JAR!"
-        else
-          echo "Creating symlink for prefab-plugin-2.1.0.jar"
-          ln -sfv "$SOURCE_PREFAB_JAR" "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar"
-        fi
-
-        echo "Checking for source file: $SOURCE_ANDROID_JAR"
-        if [ ! -f "$SOURCE_ANDROID_JAR" ]; then
-          echo "ERROR: Source file android.jar not found at $SOURCE_ANDROID_JAR!"
-        else
-          echo "Creating symlink for android.jar"
-          ln -sfv "$SOURCE_ANDROID_JAR" "$SYMLINK_DIR_ABSOLUTE/android.jar"
-        fi
-        
-        echo "Verifying created symlinks in $SYMLINK_DIR_ABSOLUTE/:"
+        ln -sfv "$SOURCE_PREFAB_JAR" "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar"
+        ln -sfv "$SOURCE_ANDROID_JAR" "$SYMLINK_DIR_ABSOLUTE/android.jar"
+        echo "Verifying created symlinks:"
         ls -la "$SYMLINK_DIR_ABSOLUTE/"
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    # --- НАЧАЛО ИСПРАВЛЕНИЙ ---
+    # Этот шаг динамически исправляет файлы Gradle перед сборкой.
+
+    - name: Patch Gradle files
+      run: |
+        # --- ШАГ 1: Добавляем недостающие зависимости в aaptcompiler ---
+        # Это решает проблему "Unresolved reference 'XMLEventReader'"
+        AAPT_BUILD_FILE="Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
+        echo "--- Patching aaptcompiler dependencies in $AAPT_BUILD_FILE ---"
         
-        # Ваша оригинальная проверка на существование файла (после создания симлинка)
-        if [ ! -f "$SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar" ]; then # Проверяем сам симлинк
-          echo "CRITICAL ERROR: prefab-plugin-2.1.0.jar (symlink or file) not found at $SYMLINK_DIR_ABSOLUTE/prefab-plugin-2.1.0.jar after attempting to create symlink!"
+        if [ -f "$AAPT_BUILD_FILE" ]; then
+          # Проверяем, что блока dependencies еще нет, чтобы не дублировать
+          if ! grep -q "dependencies {" "$AAPT_BUILD_FILE"; then
+            echo "Dependencies block not found. Adding it."
+            # Добавляем блок dependencies в конец файла
+            echo '' >> "$AAPT_BUILD_FILE"
+            echo 'dependencies {' >> "$AAPT_BUILD_FILE"
+            echo '    implementation("javax.xml.stream:stax-api:1.0-2")' >> "$AAPT_BUILD_FILE"
+            echo '    implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")' >> "$AAPT_BUILD_FILE"
+            echo '}' >> "$AAPT_BUILD_FILE"
+            echo "File $AAPT_BUILD_FILE after patching:"
+            cat "$AAPT_BUILD_FILE"
+          else
+            echo "Dependencies block already exists. Skipping patch."
+          fi
+        else
+          echo "ERROR: aaptcompiler build file not found at $AAPT_BUILD_FILE"
           exit 1
         fi
-        echo "Symlink creation step finished."
-        echo "================================================"
 
-    - name: Fix XML dependencies in aaptcompiler
-      shell: bash
-      run: |
-        echo "====== Starting 'Fix XML dependencies in aaptcompiler' step ======"
-        XML_GRADLE_FILE="$GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
-        
-        echo "Attempting to find XML Gradle File for aaptcompiler at: $XML_GRADLE_FILE"
-        if [ ! -f "$XML_GRADLE_FILE" ]; then
-          echo "ERROR: XML_GRADLE_FILE for aaptcompiler not found at $XML_GRADLE_FILE."
-          ls -la "$GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/" || true
-          find "$GITHUB_WORKSPACE/Submodule" -path "*/aaptcompiler/build.gradle.kts" -ls || echo "find command did not locate the file."
-          exit 1 
-        fi
-        
-        echo "XML Gradle File for aaptcompiler found at $XML_GRADLE_FILE."
-        echo "--- Content of $XML_GRADLE_FILE BEFORE modification ---"
-        cat "$XML_GRADLE_FILE"
-        echo "--- END of content BEFORE modification ---"
-        
-        # Создаем резервную копию перед модификацией
-        cp "$XML_GRADLE_FILE" "$XML_GRADLE_FILE.bak"
+        # --- ШАГ 2: Исключаем конфликтующую зависимость stax2-api из всей сборки ---
+        # Это решает основную проблему "Duplicate class"
+        ROOT_BUILD_FILE="build.gradle.kts" # Корневой файл сборки
+        echo ""
+        echo "--- Patching root build file $ROOT_BUILD_FILE to exclude duplicate dependencies ---"
 
-        # Зависимости, которые нужно добавить
-        # Обратите внимание на экранирование кавычек и использование переменных для читаемости
-        DEP1='implementation("javax.xml.stream:stax-api:1.0-2")'
-        # DEP2='implementation("com.sun.xml.parsers:jaxp-ri:1.4.5")' # jaxp-ri might be too much, stax-api should be enough
-        DEP3='implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")' # Woodstox is a StAX implementation
-        # Формируем текст для вставки с правильными отступами (4 пробела)
-        DEPS_TO_ADD="    $DEP1\\n    $DEP3" # Removed DEP2 for now
-
-        if grep -q "dependencies[\\s]*{" "$XML_GRADLE_FILE"; then
-          echo "Dependencies block found in $XML_GRADLE_FILE. Adding implementations..."
-          # Используем sed для вставки новых зависимостей после строки 'dependencies {'
-          # Это заменит открывающую фигурную скобку на скобку + новые зависимости
-          # Такой подход должен корректно работать и для "dependencies {}" и для "dependencies { ... }"
-          sed -i "s|dependencies[\\s]*{|dependencies {\\n$DEPS_TO_ADD|" "$XML_GRADLE_FILE"
+        if [ -f "$ROOT_BUILD_FILE" ]; then
+          # Проверяем, что правило исключения еще не добавлено
+          if ! grep -q "org.codehaus.woodstox" "$ROOT_BUILD_FILE"; then
+            echo "Exclusion rule for stax2-api not found. Adding it."
+            # Добавляем глобальное правило в конец корневого build.gradle.kts
+            echo '' >> "$ROOT_BUILD_FILE"
+            echo '// Exclude stax2-api, as it is already provided by the Kotlin compiler' >> "$ROOT_BUILD_FILE"
+            echo 'configurations.all {' >> "$ROOT_BUILD_FILE"
+            echo '    resolutionStrategy.eachDependency {' >> "$ROOT_BUILD_FILE"
+            echo '        if (requested.group == "org.codehaus.woodstox" && requested.name == "stax2-api") {' >> "$ROOT_BUILD_FILE"
+            echo '            useVersion("0")' >> "$ROOT_BUILD_FILE"
+            echo '        }' >> "$ROOT_BUILD_FILE"
+            echo '    }' >> "$ROOT_BUILD_FILE"
+            echo '}' >> "$ROOT_BUILD_FILE"
+            echo "File $ROOT_BUILD_FILE after patching:"
+            cat "$ROOT_BUILD_FILE"
+          else
+            echo "Exclusion rule already exists in $ROOT_BUILD_FILE. Skipping patch."
+          fi
         else
-          echo "Dependencies block NOT found in $XML_GRADLE_FILE. Appending new dependencies block..."
-          echo -e "\\ndependencies {\\n$DEPS_TO_ADD\\n}" >> "$XML_GRADLE_FILE"
+          echo "WARNING: Root build.gradle.kts not found. The duplicate class error might persist."
         fi
-        
-        echo "--- Content of $XML_GRADLE_FILE AFTER modification ---"
-        cat "$XML_GRADLE_FILE"
-        echo "--- END of content AFTER modification ---"
-        echo "XML dependencies fix for aaptcompiler applied."
-        echo "==========================================================="
+        echo "--- Gradle patching finished ---"
 
-    - name: Exclude conflicting jaxp-api module from root project
-      shell: bash
-      run: |
-        echo "====== Starting 'Exclude conflicting jaxp-api module' step ======"
-        ROOT_GRADLE_FILE="$GITHUB_WORKSPACE/build.gradle.kts" # Or build.gradle if you use Groovy
-        
-        if [ ! -f "$ROOT_GRADLE_FILE" ]; then
-          echo "ERROR: Root Gradle file not found at $ROOT_GRADLE_FILE. Please check the path."
-          exit 1
-        fi
-        
-        echo "Root Gradle file found at $ROOT_GRADLE_FILE."
-        echo "--- Content of $ROOT_GRADLE_FILE BEFORE modification ---"
-        cat "$ROOT_GRADLE_FILE"
-        echo "--- END of content BEFORE modification ---"
-        
-        # Check if the exclusion already exists to avoid duplication
-        if grep -q "exclude group: \"javax.xml.parsers\", module: \"jaxp-api\"" "$ROOT_GRADLE_FILE"; then
-          echo "Exclusion for jaxp-api already exists in $ROOT_GRADLE_FILE. Skipping."
-        else
-          echo "Adding exclusion for jaxp-api to $ROOT_GRADLE_FILE."
-          # This is a generic way. You might need to target a specific dependency configuration.
-          # Example: Add to all configurations that might include it.
-          # This sed command adds the exclusion to any 'implementation(...)' or 'api(...)' line.
-          # Adjust the pattern if your conflicting dependency is declared differently.
-          # This example tries to add it to a common dependency if you know it.
-          # If you don't know which specific dependency, you might need a more complex script
-          # or apply it to all 'configurations.all { ... }'
-          
-          # Attempt to add to a specific known problematic dependency (replace 'com.example:problematic-library')
-          # if sed -i '/implementation("com.example:problematic-library:[^"]*")/ {a\
-          # /        exclude(group = "javax.xml.parsers", module = "jaxp-api")\
-          # / }' "$ROOT_GRADLE_FILE"; then
-          #    echo "Added exclusion to com.example:problematic-library"
-          # else
-          #    echo "Could not find com.example:problematic-library to add exclusion, attempting global exclusion."
-             # Global exclusion (less ideal, but can work as a fallback)
-             # This adds a configurations.all block if not present, or appends to it.
-             if grep -q "configurations.all {" "$ROOT_GRADLE_FILE"; then
-               sed -i '/configurations.all {/a \ \ \ \ resolutionStrategy.eachDependency { \n        if (requested.group == "javax.xml.parsers" && requested.name == "jaxp-api") {\n            useVersion("0") // Effectively exclude by requesting a non-existent version\n        }\n    }' "$ROOT_GRADLE_FILE"
-             else
-               echo -e "\\nconfigurations.all {\\n    resolutionStrategy.eachDependency { \\n        if (requested.group == \"javax.xml.parsers\" && requested.name == \"jaxp-api\") {\\n            useVersion(\"0\") \\n        }\\n    }\\n}" >> "$ROOT_GRADLE_FILE"
-             fi
-          echo "Applied a general exclusion rule for jaxp-api."
-        # fi # End of specific dependency check
-        fi # End of checking if exclusion already exists
-        
-        echo "--- Content of $ROOT_GRADLE_FILE AFTER modification ---"
-        cat "$ROOT_GRADLE_FILE"
-        echo "--- END of content AFTER modification ---"
-        echo "Exclusion step for jaxp-api finished."
-        echo "==========================================================="
+    # --- КОНЕЦ ИСПРАВЛЕНИЙ ---
 
     - name: Build APK for termux
-      run: |
-        ./gradlew clean
-        ./gradlew :app_flavor:termux:assembleRelease --stacktrace --info
+      run: ./gradlew :app_flavor:termux:assembleRelease --stacktrace
 
     - name: Get version info
       id: version
       run: |
-        VERSION_FILE_PATH="app_flavor/termux/build.gradle" 
-        if [ ! -f "$VERSION_FILE_PATH" ]; then
-          echo "Error: Version file not found at $VERSION_FILE_PATH"
-          exit 1
-        fi
+        VERSION_FILE_PATH="app_flavor/termux/build.gradle"
         VERSION_CANDIDATE=$(grep -m 1 "versionName" "$VERSION_FILE_PATH" | awk '{print $2}' | tr -d '"')
-        if [ -z "$VERSION_CANDIDATE" ]; then
-          echo "Error: Could not extract version name from $VERSION_FILE_PATH using 'versionName'."
-          cat "$VERSION_FILE_PATH"
-          exit 1
-        fi
         echo "Extracted VERSION=${VERSION_CANDIDATE}"
         echo "VERSION=${VERSION_CANDIDATE}" >> $GITHUB_ENV
         echo "APK_NAME=AIDE-Plus-Termux-v${VERSION_CANDIDATE}.apk" >> $GITHUB_ENV
@@ -206,32 +119,32 @@ jobs:
       run: |
         mkdir -p build/outputs/apk/
         EXPECTED_APK_PATH="app_flavor/termux/build/outputs/apk/termux/release/app-termux-release.apk"
-        echo "Looking for APK at: $EXPECTED_APK_PATH"
         if [ -f "$EXPECTED_APK_PATH" ]; then
-          mv "$EXPECTED_APK_PATH" "build/outputs/apk/${APK_NAME}"
-          echo "APK successfully renamed and moved to build/outputs/apk/${APK_NAME}"
+          mv "$EXPECTED_APK_PATH" "build/outputs/apk/${{ env.APK_NAME }}"
+          echo "APK successfully renamed and moved to build/outputs/apk/${{ env.APK_NAME }}"
         else
-          echo "WARNING: APK not found at expected location: $EXPECTED_APK_PATH"
-          find "$GITHUB_WORKSPACE" -name "*.apk" -ls 
+          echo "ERROR: APK not found at expected location: $EXPECTED_APK_PATH"
+          find "$GITHUB_WORKSPACE" -name "*.apk" -ls
           exit 1
         fi
-        
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: AIDE-Plus-Termux-APK
-        path: build/outputs/apk/${APK_NAME}
+        path: build/outputs/apk/${{ env.APK_NAME }}
         
+    # Шаги для GitHub Pages остаются без изменений
     - name: Setup GitHub Pages
       if: startsWith(github.ref, 'refs/tags/')
       uses: actions/configure-pages@v4
-      
+
     - name: Upload to GitHub Pages
       if: startsWith(github.ref, 'refs/tags/')
       uses: actions/upload-pages-artifact@v3
       with:
         path: build/outputs/apk/
-        
+
     - name: Deploy to GitHub Pages
       if: startsWith(github.ref, 'refs/tags/')
       uses: actions/deploy-pages@v4
