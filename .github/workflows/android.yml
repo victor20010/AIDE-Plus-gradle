@@ -50,24 +50,17 @@ jobs:
         if [ -f "$XML_GRADLE_FILE" ]; then
           echo "Adding XML dependencies to $XML_GRADLE_FILE"
           
-          # Создаем временный файл для dependencies
-          cat > xml_dependencies.txt << 'EOL'
-            implementation("javax.xml.stream:stax-api:1.0-2")
-            implementation("com.sun.xml.parsers:jaxp-ri:1.4.5")
-            implementation("org.codehaus.woodstox:woodstox-core-asl:4.4.1")
-          EOL
-          
-          # Проверяем наличие блока dependencies
-          if grep -q "dependencies\s*{" "$XML_GRADLE_FILE"; then
-            # Добавляем зависимости в существующий блок dependencies
-            sed -i '/dependencies\s*{/r xml_dependencies.txt' "$XML_GRADLE_FILE"
+          # Простой способ добавления зависимостей
+          if grep -q "dependencies" "$XML_GRADLE_FILE"; then
+            # Если блок dependencies уже есть, добавляем зависимости в него
+            cp "$XML_GRADLE_FILE" "$XML_GRADLE_FILE.bak"
+            awk 'BEGIN {found=0} 
+            /dependencies[\s]*\{/ {found=1; print; print "    implementation(\"javax.xml.stream:stax-api:1.0-2\")"; print "    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")"; print "    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")"; next} 
+            {print}' "$XML_GRADLE_FILE.bak" > "$XML_GRADLE_FILE"
           else
-            # Создаем новый блок dependencies
-            echo -e "\ndependencies {\n$(cat xml_dependencies.txt)\n}" >> "$XML_GRADLE_FILE"
+            # Если блока dependencies нет, добавляем в конец файла
+            echo -e "\ndependencies {\n    implementation(\"javax.xml.stream:stax-api:1.0-2\")\n    implementation(\"com.sun.xml.parsers:jaxp-ri:1.4.5\")\n    implementation(\"org.codehaus.woodstox:woodstox-core-asl:4.4.1\")\n}" >> "$XML_GRADLE_FILE"
           fi
-          
-          # Удаляем временный файл
-          rm xml_dependencies.txt
           
           echo "Updated $XML_GRADLE_FILE:"
           cat "$XML_GRADLE_FILE"
@@ -75,7 +68,6 @@ jobs:
           echo "WARNING: aaptcompiler build.gradle.kts not found at $XML_GRADLE_FILE"
           find "$GITHUB_WORKSPACE" -name "aaptcompiler" -type d || true
         fi
-      shell: bash
 
     - name: Build APK for termux
       run: |
