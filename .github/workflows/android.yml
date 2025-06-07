@@ -63,20 +63,19 @@ jobs:
         grep -q '^stax-api[ ]*=' "$FILE" || sed -i '/^\[libraries\]/a stax-api = { module = "javax.xml.stream:stax-api", version.ref = "stax-api" }' "$FILE"
         echo "----- gradle/libs.versions.toml -----"
         cat "$FILE"
-
+    
     - name: Patch aaptcompiler build.gradle.kts for XML dependencies
       run: |
         FILE="Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
         # Add repositories block if missing
         grep -q 'repositories' "$FILE" || sed -i '1irepositories {\n    mavenCentral()\n}\n' "$FILE"
-        # Add woodstox/stax-api dependencies if missing
-        grep -q 'libs.woodstox.core' "$FILE" || \
-          sed -i '/dependencies\s*{/a \    implementation(libs.woodstox.core)' "$FILE"
-        grep -q 'libs.stax.api' "$FILE" || \
-          sed -i '/dependencies\s*{/a \    implementation(libs.stax.api)' "$FILE"
+        # Add woodstox/stax-api dependencies if missing (direct, not via libs)
+        grep -q 'javax.xml.stream:stax-api' "$FILE" || \
+          sed -i '/dependencies\s*{/a \    implementation("javax.xml.stream:stax-api:1.0-2")' "$FILE"
+        grep -q 'org.codehaus.woodstox:woodstox-core' "$FILE" || \
+          sed -i '/dependencies\s*{/a \    implementation("org.codehaus.woodstox:woodstox-core:6.2.4")' "$FILE"
         echo "----- $FILE -----"
         cat "$FILE"
-
     - name: Workaround for prefab-plugin path issue (for all flavors)
       run: |
         ACTUAL_FILE_LOCATION="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar"
