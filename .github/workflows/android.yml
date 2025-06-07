@@ -6,7 +6,7 @@ on:
       - v*
   pull_request:
     branches: [ "master" ]
-  workflow_dispatch: { }
+  workflow_dispatch: {}
 
 jobs:
   build:
@@ -32,11 +32,45 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Patch aaptcompiler build.gradle.kts (add StAX dependencies)
+    - name: Ensure mavenCentral is in all build.gradle(.kts)
       run: |
-        FILE="$GITHUB_WORKSPACE/Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
-        grep -q 'javax.xml.stream:stax-api' "$FILE" || \
-          sed -i '/dependencies\s*{/a \    implementation("javax.xml.stream:stax-api:1.0-2")\n    implementation("org.codehaus.woodstox:woodstox-core:6.2.4")' "$FILE"
+        find . -type f \( -name "build.gradle.kts" -o -name "build.gradle" \) | while read file; do
+          grep -q 'mavenCentral()' "$file" || \
+            sed -i '/repositories\s*{/a \    mavenCentral()' "$file"
+        done
+
+    - name: Ensure mavenCentral is in dependencyResolutionManagement (settings.gradle.kts)
+      run: |
+        if [ -f "settings.gradle.kts" ]; then
+          grep -q 'mavenCentral()' settings.gradle.kts || \
+            sed -i '/repositories\s*{/a \        mavenCentral()' settings.gradle.kts
+        fi
+
+    - name: Patch gradle/libs.versions.toml for XML dependencies
+      run: |
+        FILE="gradle/libs.versions.toml"
+        if [ -f "$FILE" ]; then
+          grep -q '\[versions\]' "$FILE" || echo "[versions]" >> "$FILE"
+          grep -q '^woodstox-core' "$FILE" || echo 'woodstox-core = "6.2.4"' >> "$FILE"
+          grep -q '^stax-api' "$FILE" || echo 'stax-api = "1.0-2"' >> "$FILE"
+          grep -q '\[libraries\]' "$FILE" || echo "[libraries]" >> "$FILE"
+          grep -q '^woodstox-core' "$FILE" || echo 'woodstox-core = { module = "org.codehaus.woodstox:woodstox-core", version.ref = "woodstox-core" }' >> "$FILE"
+          grep -q '^stax-api' "$FILE" || echo 'stax-api = { module = "javax.xml.stream:stax-api", version.ref = "stax-api" }' >> "$FILE"
+          echo "----- gradle/libs.versions.toml -----"
+          cat "$FILE"
+        fi
+
+    - name: Patch aaptcompiler build.gradle.kts for XML dependencies
+      run: |
+        FILE="Submodule/Compiletion/Xml/aaptcompiler/build.gradle.kts"
+        # Add repositories block if missing
+        grep -q 'repositories' "$FILE" || sed -i '1irepositories {\n    mavenCentral()\n}\n' "$FILE"
+        # Add woodstox/stax-api dependencies if missing
+        grep -q 'libs.woodstox.core' "$FILE" || \
+          sed -i '/dependencies\s*{/a \    implementation(libs.woodstox.core)' "$FILE"
+        grep -q 'libs.stax.api' "$FILE" || \
+          sed -i '/dependencies\s*{/a \    implementation(libs.stax.api)' "$FILE"
+        echo "----- $FILE -----"
         cat "$FILE"
 
     - name: Workaround for prefab-plugin path issue (for all flavors)
@@ -44,17 +78,10 @@ jobs:
         ACTUAL_FILE_LOCATION="$GITHUB_WORKSPACE/Submodule/AIDE/AIDE-Plus/app_rewrite/libs/prefab-plugin-2.1.0.jar"
         EXPECTED_SYMLINK_DIR="$GITHUB_WORKSPACE/Submodule/AIDE/app_rewrite/libs"
         EXPECTED_SYMLINK_PATH="$EXPECTED_SYMLINK_DIR/prefab-plugin-2.1.0.jar"
-
-        echo "Attempting to create symlink for prefab-plugin-2.1.0.jar"
         if [ -f "$ACTUAL_FILE_LOCATION" ]; then
           mkdir -p "$EXPECTED_SYMLINK_DIR"
           ln -sf "$ACTUAL_FILE_LOCATION" "$EXPECTED_SYMLINK_PATH"
-          ls -la "$EXPECTED_SYMLINK_DIR"
-        else
-          echo "ERROR: $ACTUAL_FILE_LOCATION not found"
-          exit 1
         fi
-      shell: bash
 
     - name: Build APK for ${{ matrix.flavor }}
       run: ./gradlew app_flavor:${{ matrix.flavor }}:assembleRelease
